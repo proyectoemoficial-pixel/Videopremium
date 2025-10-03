@@ -7,7 +7,6 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters
 )
-from premium import registrar_usuario, contar_usuarios, usuarios
 from dotenv import load_dotenv
 from aiohttp import web
 import aiohttp
@@ -36,6 +35,9 @@ LIMITE_GRATIS = 3
 application = None
 bot = None
 
+# Sistema de usuarios
+usuarios = {}  # {user_id: {fecha_registro, ...}}
+
 # Sistema de conteo de descargas
 descargas_usuarios = {}  # {user_id: contador_descargas}
 
@@ -43,11 +45,29 @@ descargas_usuarios = {}  # {user_id: contador_descargas}
 usuarios_verificados = {}  # {user_id: timestamp_ultima_verificacion}
 TIEMPO_VERIFICACION = timedelta(hours=1)  # Reverificar cada hora
 
+def registrar_usuario(user_id):
+    """Registra un nuevo usuario"""
+    if user_id not in usuarios:
+        usuarios[user_id] = {
+            'fecha_registro': datetime.now().isoformat(),
+            'descargas': 0
+        }
+        logger.info(f"Nuevo usuario registrado: {user_id}")
+
+def contar_usuarios():
+    """Cuenta el total de usuarios registrados"""
+    return len(usuarios)
+
 def contar_descarga_usuario(user_id):
     """Incrementa el contador de descargas del usuario"""
     if user_id not in descargas_usuarios:
         descargas_usuarios[user_id] = 0
     descargas_usuarios[user_id] += 1
+    
+    # Actualizar también en el diccionario de usuarios
+    if user_id in usuarios:
+        usuarios[user_id]['descargas'] = descargas_usuarios[user_id]
+    
     return descargas_usuarios[user_id]
 
 def obtener_descargas_usuario(user_id):
@@ -169,7 +189,7 @@ async def manejar_serie_enlaces(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.message.from_user.id
     total_videos = len(message_ids)
     
-    processing_msg = await update.message.reply_text(f"{tipo_contenido} detectada: {total_videos} episodios**\n\n🔄 Comenzando envío...")
+    processing_msg = await update.message.reply_text(f"{tipo_contenido} detectada: {total_videos} episodios\n\n🔄 Comenzando envío...")
     
     enviados = 0
     errores = 0
@@ -177,7 +197,7 @@ async def manejar_serie_enlaces(update: Update, context: ContextTypes.DEFAULT_TY
     for i, message_id in enumerate(message_ids, 1):
         try:
             if i % 3 == 0 or i == total_videos:
-                await processing_msg.edit_text(f"{tipo_contenido} en progreso**\n\n"
+                await processing_msg.edit_text(f"{tipo_contenido} en progreso\n\n"
                                               f"📊 Episodio: {i}/{total_videos}\n"
                                               f"✅ Enviados: {enviados}\n"
                                               f"❌ Errores: {errores}")
@@ -215,7 +235,7 @@ async def manejar_serie_enlaces(update: Update, context: ContextTypes.DEFAULT_TY
     
     contar_descarga_usuario(user_id)
     
-    await processing_msg.edit_text(f"🎉 **¡{tipo_contenido} completada!**\n\n"
+    await processing_msg.edit_text(f"🎉 ¡{tipo_contenido} completada!\n\n"
                                   f"📺 Total episodios: {total_videos}\n"
                                   f"✅ Enviados exitosamente: {enviados}\n"
                                   f"❌ Errores: {errores}\n\n"
