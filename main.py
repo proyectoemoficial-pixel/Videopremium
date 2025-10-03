@@ -27,13 +27,19 @@ PORT = int(os.environ.get("PORT", 8080))
 CANAL_PELICULAS_ID = -1002179007284  # Canal de películas
 CANAL_SERIES_ID = -1002148331988     # Canal de series
 
-CANAL_OBLIGATORIO_ID = -1002545667663
-CANAL_LINK = "https://t.me/+GKh9rqE66yFiY2Zh"
+# Canales obligatorios para seguir
+CANAL_OBLIGATORIO_1_LINK = "https://t.me/+e88nlffwNmU0YWFh"
+CANAL_OBLIGATORIO_2_LINK = "https://t.me/+xb27mNTPnohhMjQx"
+
 LIMITE_GRATIS = 3
 
 # Variables globales
 application = None
 bot = None
+
+# IDs de los canales (se obtendrán automáticamente)
+CANAL_OBLIGATORIO_1_ID = None
+CANAL_OBLIGATORIO_2_ID = None
 
 # Sistema de usuarios
 usuarios = {}  # {user_id: {fecha_registro, ...}}
@@ -86,7 +92,7 @@ def necesita_reverificacion(user_id):
 
 async def verificar_miembro_canal(user_id, forzar=False):
     """
-    Verifica si el usuario es miembro del canal obligatorio PRIVADO
+    Verifica si el usuario es miembro de AMBOS canales obligatorios
     
     Args:
         user_id: ID del usuario a verificar
@@ -98,23 +104,40 @@ async def verificar_miembro_canal(user_id, forzar=False):
             logger.info(f"Usuario {user_id} verificado recientemente (cache)")
             return True
         
-        # Verificar directamente con la API de Telegram
-        member = await bot.get_chat_member(CANAL_OBLIGATORIO_ID, user_id)
+        # Verificar ambos canales
+        es_miembro_canal1 = False
+        es_miembro_canal2 = False
         
-        # Verificar que esté en el canal (no bloqueado ni expulsado)
-        if member.status in ['member', 'administrator', 'creator']:
+        # Verificar canal 1
+        if CANAL_OBLIGATORIO_1_ID:
+            try:
+                member1 = await bot.get_chat_member(CANAL_OBLIGATORIO_1_ID, user_id)
+                es_miembro_canal1 = member1.status in ['member', 'administrator', 'creator']
+            except Exception as e:
+                logger.error(f"Error verificando canal 1: {e}")
+        
+        # Verificar canal 2
+        if CANAL_OBLIGATORIO_2_ID:
+            try:
+                member2 = await bot.get_chat_member(CANAL_OBLIGATORIO_2_ID, user_id)
+                es_miembro_canal2 = member2.status in ['member', 'administrator', 'creator']
+            except Exception as e:
+                logger.error(f"Error verificando canal 2: {e}")
+        
+        # Debe estar en AMBOS canales
+        if es_miembro_canal1 and es_miembro_canal2:
             usuarios_verificados[user_id] = datetime.now()
-            logger.info(f"Usuario {user_id} verificado como miembro del canal privado")
+            logger.info(f"Usuario {user_id} verificado en ambos canales")
             return True
         else:
-            # Si ya no es miembro, remover del cache
+            # Si ya no es miembro de ambos, remover del cache
             if user_id in usuarios_verificados:
                 del usuarios_verificados[user_id]
-                logger.info(f"Usuario {user_id} removido de verificados: {member.status}")
+                logger.info(f"Usuario {user_id} removido de verificados")
             return False
             
     except Exception as e:
-        logger.error(f"Error verificando membresía de {user_id} en canal privado: {e}")
+        logger.error(f"Error verificando membresía de {user_id}: {e}")
         # En caso de error, remover del cache por seguridad
         if user_id in usuarios_verificados:
             del usuarios_verificados[user_id]
@@ -141,10 +164,11 @@ async def puede_descargar(user_id):
     return False, "Límite alcanzado"
 
 def crear_boton_unirse():
-    """Crea el botón para unirse al canal"""
+    """Crea los botones para unirse a ambos canales"""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 ÚNETE AL CANAL GRATIS", url=CANAL_LINK)],
-        [InlineKeyboardButton("✅ Ya me uní, verificar", callback_data="verificar_canal")]
+        [InlineKeyboardButton("🎬 ÚNETE AL CANAL 1", url=CANAL_OBLIGATORIO_1_LINK)],
+        [InlineKeyboardButton("📺 ÚNETE AL CANAL 2", url=CANAL_OBLIGATORIO_2_LINK)],
+        [InlineKeyboardButton("✅ Ya me uní a ambos, verificar", callback_data="verificar_canal")]
     ])
 
 # Limpiar verificaciones expiradas periódicamente
@@ -207,8 +231,7 @@ async def manejar_serie_enlaces(update: Update, context: ContextTypes.DEFAULT_TY
                     chat_id=update.effective_chat.id,
                     from_chat_id=canal_id,
                     message_id=message_id,
-                    caption=f"{tipo_contenido} - Episodio {i}/{total_videos}",
-                    protect_content=True  # Protección contra reenvío
+                    caption=f"{tipo_contenido} - Episodio {i}/{total_videos}"
                 )
                 enviados += 1
                 logger.info(f"Serie: Episodio {i} enviado (ID: {message_id})")
@@ -218,8 +241,7 @@ async def manejar_serie_enlaces(update: Update, context: ContextTypes.DEFAULT_TY
                     await context.bot.forward_message(
                         chat_id=update.effective_chat.id,
                         from_chat_id=canal_id,
-                        message_id=message_id,
-                        protect_content=True  # Protección contra reenvío
+                        message_id=message_id
                     )
                     enviados += 1
                     logger.info(f"Serie: Episodio {i} forwardeado (ID: {message_id})")
@@ -254,6 +276,17 @@ async def keep_alive():
         except Exception as e:
             logger.error(f"Error en keep-alive: {e}")
 
+async def obtener_ids_canales():
+    """Intenta obtener los IDs de los canales obligatorios"""
+    global CANAL_OBLIGATORIO_1_ID, CANAL_OBLIGATORIO_2_ID
+    
+    # Nota: Los IDs de canales privados deben ser configurados manualmente
+    # ya que no se pueden obtener automáticamente desde los enlaces de invitación
+    logger.info("⚠️ IMPORTANTE: Configura manualmente los IDs de los canales obligatorios")
+    logger.info(f"Canal 1: {CANAL_OBLIGATORIO_1_LINK}")
+    logger.info(f"Canal 2: {CANAL_OBLIGATORIO_2_LINK}")
+    logger.info("Usa el comando /getchatid desde dentro de cada canal para obtener sus IDs")
+
 # --- HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,7 +300,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if es_miembro:
         status_msg = "🎉 ¡Acceso ILIMITADO activado!"
     else:
-        status_msg = f"📊 Descargas: {descargas}/{LIMITE_GRATIS} (después únete al canal para acceso ilimitado)"
+        status_msg = f"📊 Descargas: {descargas}/{LIMITE_GRATIS}\n💡 Únete a AMBOS canales para acceso ilimitado"
     
     await update.message.reply_text(f"""👋 ¡Bienvenido a nuestro bot!
 
@@ -291,7 +324,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not puede:
         await update.message.reply_text(
             f"⚠️ **Has alcanzado el límite de {LIMITE_GRATIS} descargas gratuitas**\n\n"
-            f"🚀 **¡ÚNETE A NUESTRO CANAL para acceso ILIMITADO!**\n"
+            f"🚀 **¡ÚNETE A AMBOS CANALES para acceso ILIMITADO!**\n"
             f"Es completamente GRATIS y tendrás descargas sin límite.\n\n"
             f"📊 Tus descargas: {obtener_descargas_usuario(user_id)}/{LIMITE_GRATIS}",
             reply_markup=crear_boton_unirse()
@@ -322,7 +355,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if descargas_actuales >= LIMITE_GRATIS and user_id not in usuarios_verificados:
                 await update.message.reply_text(
                     f"🎯 **Has usado {descargas_actuales}/{LIMITE_GRATIS} descargas**\n\n"
-                    f"🚀 **¡Únete al canal para más contenido ilimitado!**",
+                    f"🚀 **¡Únete a AMBOS canales para más contenido ilimitado!**",
                     reply_markup=crear_boton_unirse()
                 )
             return
@@ -348,8 +381,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     copied_msg = await context.bot.copy_message(
                         chat_id=update.effective_chat.id,
                         from_chat_id=canal_id,
-                        message_id=message_id,
-                        protect_content=True  # Protección contra reenvío
+                        message_id=message_id
                     )
                     logger.info(f"Mensaje copiado exitosamente: new_msg_id={copied_msg.message_id}")
                     contar_descarga_usuario(user_id)
@@ -372,8 +404,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     forwarded_msg = await context.bot.forward_message(
                         chat_id=update.effective_chat.id,
                         from_chat_id=canal_id,
-                        message_id=message_id,
-                        protect_content=True  # Protección contra reenvío
+                        message_id=message_id
                     )
                     logger.info(f"Mensaje forwardeado exitosamente: new_msg_id={forwarded_msg.message_id}")
                     contar_descarga_usuario(user_id)
@@ -409,17 +440,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if descargas_actuales >= LIMITE_GRATIS and user_id not in usuarios_verificados:
         await update.message.reply_text(
             f"🎯 **Has usado {descargas_actuales}/{LIMITE_GRATIS} descargas**\n\n"
-            f"🚀 **¡Únete al canal para acceso ILIMITADO!**",
+            f"🚀 **¡Únete a AMBOS canales para acceso ILIMITADO!**",
             reply_markup=crear_boton_unirse()
         )
 
 async def verificar_canal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Verifica si el usuario se unió al canal (siempre forzando verificación)"""
+    """Verifica si el usuario se unió a ambos canales (siempre forzando verificación)"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     
-    verificando_msg = await query.message.reply_text("🔄 Verificando tu membresía en el canal...")
+    verificando_msg = await query.message.reply_text("🔄 Verificando tu membresía en ambos canales...")
     
     try:
         # IMPORTANTE: Siempre forzar verificación al hacer clic en el botón
@@ -431,16 +462,17 @@ async def verificar_canal_callback(update: Update, context: ContextTypes.DEFAULT
                 "✅ Ahora tienes acceso ILIMITADO a descargas\n"
                 "🚀 Envía todos los enlaces que quieras\n"
                 "📺 También puedes enviar series completas\n\n"
-                "¡Gracias por unirte al canal!"
+                "¡Gracias por unirte a ambos canales!"
             )
         else:
             await verificando_msg.edit_text(
-                "❌ **Aún no detectamos que te hayas unido al canal**\n\n"
+                "❌ **Aún no detectamos que te hayas unido a AMBOS canales**\n\n"
                 "Por favor:\n"
-                "1. Haz clic en 'ÚNETE AL CANAL' ⬇️\n"
-                "2. Únete al canal\n" 
-                "3. Regresa y haz clic en 'Ya me uní, verificar'\n\n"
-                "⚠️ A veces tarda unos segundos en detectarse, inténtalo de nuevo.",
+                "1. Haz clic en 'ÚNETE AL CANAL 1' ⬆️\n"
+                "2. Haz clic en 'ÚNETE AL CANAL 2' ⬆️\n"
+                "3. Únete a AMBOS canales\n" 
+                "4. Regresa y haz clic en 'Ya me uní a ambos, verificar'\n\n"
+                "⚠️ Debes estar en AMBOS canales para acceso ilimitado.",
                 reply_markup=crear_boton_unirse()
             )
     except Exception as e:
@@ -458,11 +490,12 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📊 **Estadísticas del bot:**\n"
         f"👥 Usuarios registrados: {total_usuarios}\n"
-        f"✅ Verificados en canal: {total_verificados}\n"
+        f"✅ Verificados en canales: {total_verificados}\n"
         f"📥 Total descargas: {total_descargas}\n"
         f"🎬 Canal películas: {CANAL_PELICULAS_ID}\n"
         f"📺 Canal series: {CANAL_SERIES_ID}\n"
-        f"🔗 Canal obligatorio: {CANAL_LINK}"
+        f"🔗 Canal 1: {CANAL_OBLIGATORIO_1_LINK}\n"
+        f"🔗 Canal 2: {CANAL_OBLIGATORIO_2_LINK}"
     )
 
 async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -477,7 +510,7 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📱 **Tipo:** {chat_type}\n"
         f"📝 **Título:** {title}\n\n"
         f"💡 Si este es tu canal privado, usa este ID:\n"
-        f"`CANAL_ID = {chat_id}`"
+        f"`CANAL_OBLIGATORIO_X_ID = {chat_id}`"
     )
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,7 +551,8 @@ async def health_check(request):
         "canales": {
             "peliculas": CANAL_PELICULAS_ID,
             "series": CANAL_SERIES_ID,
-            "obligatorio": CANAL_OBLIGATORIO_ID
+            "obligatorio_1": CANAL_OBLIGATORIO_1_ID,
+            "obligatorio_2": CANAL_OBLIGATORIO_2_ID
         }
     })
 
@@ -534,7 +568,7 @@ async def telegram_webhook(request):
 
 async def root_handler(request):
     return web.Response(
-        text="🤖 Bot de Películas y Series - Videos protegidos contra reenvío ✅",
+        text="🤖 Bot de Películas y Series - Videos se pueden compartir ✅",
         content_type="text/plain"
     )
 
@@ -546,15 +580,19 @@ async def init_app():
     logger.info("Inicializando bot...")
     logger.info(f"🎬 Canal PELÍCULAS (privado): ID={CANAL_PELICULAS_ID}")
     logger.info(f"📺 Canal SERIES (privado): ID={CANAL_SERIES_ID}")
-    logger.info(f"🔒 Canal obligatorio (privado): ID={CANAL_OBLIGATORIO_ID}")
-    logger.info(f"🔗 Enlace del canal: {CANAL_LINK}")
+    logger.info(f"🔗 Canal obligatorio 1: {CANAL_OBLIGATORIO_1_LINK}")
+    logger.info(f"🔗 Canal obligatorio 2: {CANAL_OBLIGATORIO_2_LINK}")
     logger.info(f"📊 Límite gratis: {LIMITE_GRATIS} descargas")
     logger.info(f"⏱️ Tiempo de verificación: {TIEMPO_VERIFICACION}")
-    logger.info("🔐 PROTECCIÓN ACTIVADA: Videos no se pueden reenviar")
+    logger.info("✅ Videos SE PUEDEN compartir (protect_content desactivado)")
     logger.info("⚡ VERIFICACIÓN INMEDIATA ACTIVADA - Detecta salidas del canal al instante")
+    logger.info("🔐 Requiere membresía en AMBOS canales para acceso ilimitado")
     
     application = Application.builder().token(BOT_TOKEN).build()
     bot = application.bot
+
+    # Intentar obtener IDs de canales
+    await obtener_ids_canales()
 
     # Registrar handlers
     application.add_handler(CommandHandler("start", start))
@@ -566,7 +604,6 @@ async def init_app():
 
     await application.initialize()
     await application.start()
-    
     webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
     await bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook configurado: {webhook_url}")
