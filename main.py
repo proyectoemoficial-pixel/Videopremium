@@ -1,10 +1,10 @@
 import os
 import re
 import asyncio
-from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime
+from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    Application, CommandHandler, MessageHandler,
     ContextTypes, filters
 )
 from dotenv import load_dotenv
@@ -27,29 +27,15 @@ PORT = int(os.environ.get("PORT", 8080))
 CANAL_PELICULAS_ID = -1002179007284  # Canal de películas
 CANAL_SERIES_ID = -1002148331988     # Canal de series
 
-# Canales obligatorios para seguir
-CANAL_OBLIGATORIO_1_LINK = "https://t.me/+e88nlffwNmU0YWFh"
-CANAL_OBLIGATORIO_2_LINK = "https://t.me/+xb27mNTPnohhMjQx"
-
-LIMITE_GRATIS = 3
-
 # Variables globales
 application = None
 bot = None
 
-# IDs de los canales (se obtendrán automáticamente)
-CANAL_OBLIGATORIO_1_ID = None
-CANAL_OBLIGATORIO_2_ID = None
-
 # Sistema de usuarios
-usuarios = {}  # {user_id: {fecha_registro, ...}}
+usuarios = {}  # {user_id: {fecha_registro, descargas}}
 
 # Sistema de conteo de descargas
 descargas_usuarios = {}  # {user_id: contador_descargas}
-
-# Sistema de verificación con expiración
-usuarios_verificados = {}  # {user_id: timestamp_ultima_verificacion}
-TIEMPO_VERIFICACION = timedelta(hours=1)  # Reverificar cada hora
 
 def registrar_usuario(user_id):
     """Registra un nuevo usuario"""
@@ -79,121 +65,6 @@ def contar_descarga_usuario(user_id):
 def obtener_descargas_usuario(user_id):
     """Obtiene el número de descargas del usuario"""
     return descargas_usuarios.get(user_id, 0)
-
-def necesita_reverificacion(user_id):
-    """Verifica si el usuario necesita ser reverificado"""
-    if user_id not in usuarios_verificados:
-        return True
-    
-    ultima_verificacion = usuarios_verificados[user_id]
-    tiempo_transcurrido = datetime.now() - ultima_verificacion
-    
-    return tiempo_transcurrido > TIEMPO_VERIFICACION
-
-async def verificar_miembro_canal(user_id, forzar=False):
-    """
-    Verifica si el usuario es miembro de AMBOS canales obligatorios
-    
-    Args:
-        user_id: ID del usuario a verificar
-        forzar: Si es True, ignora el cache y verifica directamente
-    """
-    try:
-        # Si no es forzado y la verificación es reciente, usar cache
-        if not forzar and not necesita_reverificacion(user_id):
-            logger.info(f"Usuario {user_id} verificado recientemente (cache)")
-            return True
-        
-        # Verificar ambos canales
-        es_miembro_canal1 = False
-        es_miembro_canal2 = False
-        
-        # Verificar canal 1
-        if CANAL_OBLIGATORIO_1_ID:
-            try:
-                member1 = await bot.get_chat_member(CANAL_OBLIGATORIO_1_ID, user_id)
-                es_miembro_canal1 = member1.status in ['member', 'administrator', 'creator']
-            except Exception as e:
-                logger.error(f"Error verificando canal 1: {e}")
-        
-        # Verificar canal 2
-        if CANAL_OBLIGATORIO_2_ID:
-            try:
-                member2 = await bot.get_chat_member(CANAL_OBLIGATORIO_2_ID, user_id)
-                es_miembro_canal2 = member2.status in ['member', 'administrator', 'creator']
-            except Exception as e:
-                logger.error(f"Error verificando canal 2: {e}")
-        
-        # Debe estar en AMBOS canales
-        if es_miembro_canal1 and es_miembro_canal2:
-            usuarios_verificados[user_id] = datetime.now()
-            logger.info(f"Usuario {user_id} verificado en ambos canales")
-            return True
-        else:
-            # Si ya no es miembro de ambos, remover del cache
-            if user_id in usuarios_verificados:
-                del usuarios_verificados[user_id]
-                logger.info(f"Usuario {user_id} removido de verificados")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error verificando membresía de {user_id}: {e}")
-        # En caso de error, remover del cache por seguridad
-        if user_id in usuarios_verificados:
-            del usuarios_verificados[user_id]
-        return False
-
-async def puede_descargar(user_id):
-    """
-    Verifica si el usuario puede descargar
-    SIEMPRE reverifica la membresía si ya usó el límite gratis
-    """
-    descargas = obtener_descargas_usuario(user_id)
-    
-    # Si tiene menos del límite, puede descargar
-    if descargas < LIMITE_GRATIS:
-        return True, f"Descarga {descargas + 1}/{LIMITE_GRATIS}"
-    
-    # Si ya alcanzó el límite, SIEMPRE verificar en tiempo real
-    # CLAVE: forzar=True para verificar en cada descarga
-    es_miembro = await verificar_miembro_canal(user_id, forzar=True)
-    
-    if es_miembro:
-        return True, "Acceso ilimitado ✅"
-    
-    return False, "Límite alcanzado"
-
-def crear_boton_unirse():
-    """Crea los botones para unirse a ambos canales"""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 ÚNETE AL CANAL 1", url=CANAL_OBLIGATORIO_1_LINK)],
-        [InlineKeyboardButton("📺 ÚNETE AL CANAL 2", url=CANAL_OBLIGATORIO_2_LINK)],
-        [InlineKeyboardButton("✅ Ya me uní a ambos, verificar", callback_data="verificar_canal")]
-    ])
-
-# Limpiar verificaciones expiradas periódicamente
-async def limpiar_verificaciones_expiradas():
-    """Limpia las verificaciones expiradas cada 30 minutos"""
-    while True:
-        try:
-            await asyncio.sleep(1800)  # 30 minutos
-            
-            ahora = datetime.now()
-            usuarios_a_remover = []
-            
-            for user_id, timestamp in usuarios_verificados.items():
-                if ahora - timestamp > TIEMPO_VERIFICACION * 2:  # Doble del tiempo para dar margen
-                    usuarios_a_remover.append(user_id)
-            
-            for user_id in usuarios_a_remover:
-                del usuarios_verificados[user_id]
-                logger.info(f"Verificación expirada removida para usuario {user_id}")
-            
-            if usuarios_a_remover:
-                logger.info(f"Limpieza completada: {len(usuarios_a_remover)} verificaciones expiradas removidas")
-                
-        except Exception as e:
-            logger.error(f"Error en limpieza de verificaciones: {e}")
 
 def detectar_canal_origen(texto):
     """Detecta de qué canal provienen los enlaces"""
@@ -276,17 +147,6 @@ async def keep_alive():
         except Exception as e:
             logger.error(f"Error en keep-alive: {e}")
 
-async def obtener_ids_canales():
-    """Intenta obtener los IDs de los canales obligatorios"""
-    global CANAL_OBLIGATORIO_1_ID, CANAL_OBLIGATORIO_2_ID
-    
-    # Nota: Los IDs de canales privados deben ser configurados manualmente
-    # ya que no se pueden obtener automáticamente desde los enlaces de invitación
-    logger.info("⚠️ IMPORTANTE: Configura manualmente los IDs de los canales obligatorios")
-    logger.info(f"Canal 1: {CANAL_OBLIGATORIO_1_LINK}")
-    logger.info(f"Canal 2: {CANAL_OBLIGATORIO_2_LINK}")
-    logger.info("Usa el comando /getchatid desde dentro de cada canal para obtener sus IDs")
-
 # --- HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -294,42 +154,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     registrar_usuario(user_id)
     
     descargas = obtener_descargas_usuario(user_id)
-    # Verificar membresía actual (forzar verificación)
-    es_miembro = await verificar_miembro_canal(user_id, forzar=True)
-    
-    if es_miembro:
-        status_msg = "🎉 ¡Acceso ILIMITADO activado!"
-    else:
-        status_msg = f"📊 Descargas: {descargas}/{LIMITE_GRATIS}\n💡 Únete a AMBOS canales para acceso ilimitado"
     
     await update.message.reply_text(f"""👋 ¡Bienvenido a nuestro bot!
 
- @Hsitotvbot
+@Hsitotvbot
 
 ⬇️ Aquí podrás ver tu contenido favorito como pelis y series
 
 ✨ ¿Cómo funciona?
 Pega el enlace del canal y envíanoslo
 
-{status_msg}""")
+📊 Tus descargas: {descargas}
+🎉 ¡Descargas ILIMITADAS y GRATIS!""")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.message.from_user.id
     registrar_usuario(user_id)
-
-    # Verificar si puede descargar (incluye reverificación automática)
-    puede, status = await puede_descargar(user_id)
-    
-    if not puede:
-        await update.message.reply_text(
-            f"⚠️ **Has alcanzado el límite de {LIMITE_GRATIS} descargas gratuitas**\n\n"
-            f"🚀 **¡ÚNETE A AMBOS CANALES para acceso ILIMITADO!**\n"
-            f"Es completamente GRATIS y tendrás descargas sin límite.\n\n"
-            f"📊 Tus descargas: {obtener_descargas_usuario(user_id)}/{LIMITE_GRATIS}",
-            reply_markup=crear_boton_unirse()
-        )
-        return
 
     # Detectar y procesar enlaces de canales
     if "t.me/c/" in text:
@@ -350,22 +191,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(message_ids) > 1:
             await manejar_serie_enlaces(update, context, message_ids, canal_id, tipo_contenido)
-            
-            descargas_actuales = obtener_descargas_usuario(user_id)
-            if descargas_actuales >= LIMITE_GRATIS and user_id not in usuarios_verificados:
-                await update.message.reply_text(
-                    f"🎯 **Has usado {descargas_actuales}/{LIMITE_GRATIS} descargas**\n\n"
-                    f"🚀 **¡Únete a AMBOS canales para más contenido ilimitado!**",
-                    reply_markup=crear_boton_unirse()
-                )
             return
         
         elif len(message_ids) == 1:
             message_id = message_ids[0]
-            processing_msg = await update.message.reply_text(f"⚡ Procesando tu solicitud... ({status})")
+            descargas = obtener_descargas_usuario(user_id)
+            processing_msg = await update.message.reply_text(f"⚡ Procesando tu solicitud... (Descarga #{descargas + 1})")
             
             try:
-                await processing_msg.edit_text(f"🔄 Verificando mensaje en el canal... ({status})")
+                await processing_msg.edit_text(f"🔄 Verificando mensaje en el canal...")
                 
                 try:
                     message_info = await context.bot.get_chat(canal_id)
@@ -375,7 +209,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await processing_msg.edit_text("❌ No puedo acceder al canal. Verifica que el bot sea administrador del canal con todos los permisos necesarios.")
                     return
                 
-                await processing_msg.edit_text(f"🔄 Copiando video del canal... ({status})")
+                await processing_msg.edit_text(f"🔄 Copiando video del canal...")
                 
                 try:
                     copied_msg = await context.bot.copy_message(
@@ -399,7 +233,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await processing_msg.edit_text("❌ **Error de permisos del bot**\n\n🔧 **Solución:**\n1. Ve a tu canal privado\n2. Añade este bot como administrador\n3. Dale estos permisos:\n   • Leer mensajes\n   • Enviar mensajes\n   • Gestionar mensajes\n4. Intenta de nuevo")
                         return
                 
-                await processing_msg.edit_text(f"🔄 Intentando reenvío alternativo... ({status})")
+                await processing_msg.edit_text(f"🔄 Intentando reenvío alternativo...")
                 try:
                     forwarded_msg = await context.bot.forward_message(
                         chat_id=update.effective_chat.id,
@@ -436,66 +270,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Pega múltiples enlaces (uno por línea) para enviar una serie completa"
     )
 
-    descargas_actuales = obtener_descargas_usuario(user_id)
-    if descargas_actuales >= LIMITE_GRATIS and user_id not in usuarios_verificados:
-        await update.message.reply_text(
-            f"🎯 **Has usado {descargas_actuales}/{LIMITE_GRATIS} descargas**\n\n"
-            f"🚀 **¡Únete a AMBOS canales para acceso ILIMITADO!**",
-            reply_markup=crear_boton_unirse()
-        )
-
-async def verificar_canal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Verifica si el usuario se unió a ambos canales (siempre forzando verificación)"""
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    
-    verificando_msg = await query.message.reply_text("🔄 Verificando tu membresía en ambos canales...")
-    
-    try:
-        # IMPORTANTE: Siempre forzar verificación al hacer clic en el botón
-        es_miembro = await verificar_miembro_canal(user_id, forzar=True)
-        
-        if es_miembro:
-            await verificando_msg.edit_text(
-                "🎉 **¡VERIFICACIÓN EXITOSA!**\n\n"
-                "✅ Ahora tienes acceso ILIMITADO a descargas\n"
-                "🚀 Envía todos los enlaces que quieras\n"
-                "📺 También puedes enviar series completas\n\n"
-                "¡Gracias por unirte a ambos canales!"
-            )
-        else:
-            await verificando_msg.edit_text(
-                "❌ **Aún no detectamos que te hayas unido a AMBOS canales**\n\n"
-                "Por favor:\n"
-                "1. Haz clic en 'ÚNETE AL CANAL 1' ⬆️\n"
-                "2. Haz clic en 'ÚNETE AL CANAL 2' ⬆️\n"
-                "3. Únete a AMBOS canales\n" 
-                "4. Regresa y haz clic en 'Ya me uní a ambos, verificar'\n\n"
-                "⚠️ Debes estar en AMBOS canales para acceso ilimitado.",
-                reply_markup=crear_boton_unirse()
-            )
-    except Exception as e:
-        logger.error(f"Error en verificar_canal_callback: {e}")
-        await verificando_msg.edit_text(
-            "❌ Error verificando la membresía. Intenta de nuevo en unos segundos.",
-            reply_markup=crear_boton_unirse()
-        )
-
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_usuarios = contar_usuarios()
-    total_verificados = len(usuarios_verificados)
     total_descargas = sum(descargas_usuarios.values())
     
     await update.message.reply_text(
         f"📊 **Estadísticas del bot:**\n"
         f"👥 Usuarios registrados: {total_usuarios}\n"
-        f"✅ Verificados en canales: {total_verificados}\n"
         f"📥 Total descargas: {total_descargas}\n"
         f"🎬 Canal películas: {CANAL_PELICULAS_ID}\n"
         f"📺 Canal series: {CANAL_SERIES_ID}\n"
-        f"🔗 Canal 1: {CANAL_OBLIGATORIO_1_LINK}\n"
-        f"🔗 Canal 2: {CANAL_OBLIGATORIO_2_LINK}"
+        f"🎉 Sin límites de descarga"
     )
 
 async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -508,9 +293,7 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ℹ️ **Información del chat actual:**\n"
         f"🆔 **ID:** `{chat_id}`\n"
         f"📱 **Tipo:** {chat_type}\n"
-        f"📝 **Título:** {title}\n\n"
-        f"💡 Si este es tu canal privado, usa este ID:\n"
-        f"`CANAL_OBLIGATORIO_X_ID = {chat_id}`"
+        f"📝 **Título:** {title}"
     )
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -546,13 +329,10 @@ async def health_check(request):
         "status": "ok", 
         "bot_active": True,
         "users": contar_usuarios(),
-        "verified_users": len(usuarios_verificados),
         "total_downloads": sum(descargas_usuarios.values()),
         "canales": {
             "peliculas": CANAL_PELICULAS_ID,
-            "series": CANAL_SERIES_ID,
-            "obligatorio_1": CANAL_OBLIGATORIO_1_ID,
-            "obligatorio_2": CANAL_OBLIGATORIO_2_ID
+            "series": CANAL_SERIES_ID
         }
     })
 
@@ -568,7 +348,7 @@ async def telegram_webhook(request):
 
 async def root_handler(request):
     return web.Response(
-        text="🤖 Bot de Películas y Series - Videos se pueden compartir ✅",
+        text="🤖 Bot de Películas y Series - Descargas ilimitadas ✅",
         content_type="text/plain"
     )
 
@@ -580,19 +360,11 @@ async def init_app():
     logger.info("Inicializando bot...")
     logger.info(f"🎬 Canal PELÍCULAS (privado): ID={CANAL_PELICULAS_ID}")
     logger.info(f"📺 Canal SERIES (privado): ID={CANAL_SERIES_ID}")
-    logger.info(f"🔗 Canal obligatorio 1: {CANAL_OBLIGATORIO_1_LINK}")
-    logger.info(f"🔗 Canal obligatorio 2: {CANAL_OBLIGATORIO_2_LINK}")
-    logger.info(f"📊 Límite gratis: {LIMITE_GRATIS} descargas")
-    logger.info(f"⏱️ Tiempo de verificación: {TIEMPO_VERIFICACION}")
-    logger.info("✅ Videos SE PUEDEN compartir (protect_content desactivado)")
-    logger.info("⚡ VERIFICACIÓN INMEDIATA ACTIVADA - Detecta salidas del canal al instante")
-    logger.info("🔐 Requiere membresía en AMBOS canales para acceso ilimitado")
+    logger.info("🎉 Modo: DESCARGAS ILIMITADAS (sin canales obligatorios)")
+    logger.info("✅ Videos SE PUEDEN compartir")
     
     application = Application.builder().token(BOT_TOKEN).build()
     bot = application.bot
-
-    # Intentar obtener IDs de canales
-    await obtener_ids_canales()
 
     # Registrar handlers
     application.add_handler(CommandHandler("start", start))
@@ -600,7 +372,6 @@ async def init_app():
     application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("getchatid", get_chat_id))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(verificar_canal_callback, pattern="verificar_canal"))
 
     await application.initialize()
     await application.start()
@@ -615,13 +386,11 @@ async def init_app():
     
     # Iniciar tareas en segundo plano
     asyncio.create_task(keep_alive())
-    asyncio.create_task(limpiar_verificaciones_expiradas())
     
     logger.info("✅ Bot inicializado correctamente con:")
     logger.info("   • 2 canales de contenido (Películas y Series)")
-    logger.info("   • Verificación inmediata en cada descarga")
-    logger.info("   • Protección contra reenvío activada")
-    logger.info("   • Solo enlaces de canales (TikTok y YouTube removidos)")
+    logger.info("   • Descargas ilimitadas sin restricciones")
+    logger.info("   • Sin verificación de canales obligatorios")
     return app
 
 async def main():
@@ -636,4 +405,4 @@ if __name__ == "__main__":
     try:
         web.run_app(main(), port=PORT, host="0.0.0.0")
     except Exception as e:
-        logger.error(f"Error ejecutando servidor: {e}")
+        logger.error(f"Error ejecutando servidor: {e}") 
