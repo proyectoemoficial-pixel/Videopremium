@@ -1,8 +1,8 @@
-import os
-import re
+import osj
+import repi
 import asyncio
 from datetime import datetime
-from telegram import Update
+from telegramj import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters
