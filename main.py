@@ -1,5 +1,5 @@
-import osj
-import repi
+import os
+import re
 import asyncio
 from datetime import datetime
 from telegramj import Update
@@ -24,8 +24,8 @@ WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 8080))
 
 # IDs de los canales privados de contenido
-CANAL_PELICULAS_ID = -1002179007284for id # Canal de películas
-CANAL_SERIES_ID = -1002148331988for id    # Canal de series
+CANAL_PELICULAS_ID = -1002179007284 # Canal de películas
+CANAL_SERIES_ID = -1002148331988   # Canal de series
 
 # Variables globales
 application = None
