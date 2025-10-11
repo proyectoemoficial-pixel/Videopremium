@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 from datetime import datetime
-from telegramj import Update
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters
